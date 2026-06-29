@@ -7,11 +7,8 @@ workflows:
       events:
         - push
     scripts:
-      - name: Set execute permission for gradlew
-        script: |
-          chmod +x gradlew
       - name: Build Android APK
         script: |
-          ./gradlew assembleDebug
+          gradle assembleDebug
     artifacts:
       - app/build/outputs/apk/**/*.apk
