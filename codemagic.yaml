@@ -7,8 +7,12 @@ workflows:
       events:
         - push
     scripts:
+      - name: Setup Gradle Wrapper 9.3.1
+        script: |
+          gradle wrapper --gradle-version 9.3.1
+          chmod +x gradlew
       - name: Build Android APK
         script: |
-          gradle assembleDebug
+          ./gradlew assembleDebug
     artifacts:
       - app/build/outputs/apk/**/*.apk
