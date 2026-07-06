@@ -1,0 +1,40 @@
+name: Android APK Build
+
+on:
+  push:
+    branches: [ "mediahub-unpacked" ]
+  pull_request:
+    branches: [ "mediahub-unpacked" ]
+  workflow_dispatch:
+
+# এটি রানারের সব জাভা প্রসেসকে হেডলেস মোডে রান করাবে
+env:
+  JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+
+    - name: Generate Gradle Wrapper if missing
+      run: |
+        if [ ! -f gradlew ]; then
+          gradle wrapper
+        fi
+        chmod +x gradlew
+
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug --no-daemon
