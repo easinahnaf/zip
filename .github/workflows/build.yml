@@ -5,7 +5,7 @@ on:
     branches: [ "mediahub-unpacked" ]
   pull_request:
     branches: [ "mediahub-unpacked" ]
-  workflow_dispatch: # এর মাধ্যমে আপনি নিজে বাটন চেপেও বিল্ড শুরু করতে পারবেন
+  workflow_dispatch:
 
 jobs:
   build:
@@ -25,7 +25,6 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
 
-    # আপনার প্রজেক্টের রুট ডিরেক্টরিতে gradlew ফাইলটি না থাকলে এটি তা তৈরি করে নেবে
     - name: Generate Gradle Wrapper if missing
       run: |
         if [ ! -f gradlew ]; then
@@ -33,11 +32,6 @@ jobs:
         fi
         chmod +x gradlew
 
+    # এখানে -Djava.awt.headless=true যুক্ত করা হয়েছে যেন AWT এররটি না আসে
     - name: Build Debug APK
-      run: ./gradlew assembleDebug
-
-    - name: Upload APK Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: MediaHub-Debug-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
+      run: ./gradlew assembleDebug --no-daemon -Djava.awt.headless=true
