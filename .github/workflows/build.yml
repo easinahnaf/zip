@@ -7,6 +7,10 @@ on:
     branches: [ "mediahub-unpacked" ]
   workflow_dispatch:
 
+# এটি রানারের সব জাভা প্রসেসকে হেডলেস মোডে রান করাবে
+env:
+  JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -32,6 +36,5 @@ jobs:
         fi
         chmod +x gradlew
 
-    # এখানে -Djava.awt.headless=true যুক্ত করা হয়েছে যেন AWT এররটি না আসে
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --no-daemon -Djava.awt.headless=true
+      run: ./gradlew assembleDebug --no-daemon
