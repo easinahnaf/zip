@@ -8,10 +8,11 @@ on:
 
 jobs:
   build:
+    name: Build MediaHub APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -20,16 +21,47 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Extract mediahub.zip
+        run: |
+          rm -rf mediahub-build
+          mkdir mediahub-build
+          unzip -q mediahub.zip -d mediahub-build
+
+      - name: Find Android project
+        run: |
+          echo "Searching for settings.gradle..."
+          find mediahub-build -name "settings.gradle*" -print
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
       - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
+        run: |
+          PROJECT_DIR=$(dirname "$(find mediahub-build -name "settings.gradle.kts" -print -quit)")
+          
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
+          
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: settings.gradle.kts not found!"
+            exit 1
+          fi
+          
+          cd "$PROJECT_DIR"
+          
+          echo "Building APK..."
+          gradle :app:assembleDebug --no-daemon
+
+      - name: Find APK
+        run: |
+          echo "APK files:"
+          find mediahub-build -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MediaHub-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: mediahub-build/**/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
