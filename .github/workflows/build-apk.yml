@@ -27,127 +27,117 @@ jobs:
           mkdir mediahub-build
           unzip -q mediahub.zip -d mediahub-build
 
-      - name: Locate Android project
+      - name: Find Android project
         run: |
           PROJECT_DIR="$(dirname "$(find mediahub-build -name 'settings.gradle.kts' -print -quit)")"
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: settings.gradle.kts not found"
+            echo "ERROR: Android project not found"
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project: $PROJECT_DIR"
+          echo "Android project found at: $PROJECT_DIR"
 
-      - name: Remove Firebase and Google Services
+      - name: Fix KSP version
         env:
           PROJECT_DIR: ${{ env.PROJECT_DIR }}
         run: |
           python3 - <<'PY'
+          from pathlib import Path
           import os
           import re
-          from pathlib import Path
 
-          p = Path(os.environ["PROJECT_DIR"]) / "app" / "build.gradle.kts"
+          project = Path(os.environ["PROJECT_DIR"])
+          toml = project / "gradle" / "libs.versions.toml"
 
-          if not p.exists():
-              raise SystemExit(f"Missing: {p}")
+          if not toml.exists():
+              raise SystemExit(f"ERROR: {toml} not found")
 
-          s = p.read_text(encoding="utf-8")
+          text = toml.read_text(encoding="utf-8")
 
-          # Remove Google Services plugin
-          s = re.sub(
-              r'^[ \t]*alias\s*\(\s*libs\.plugins\.google\.services\s*\)\s*\r?\n',
-              '',
-              s,
-              flags=re.MULTILINE
-          )
+          old = 'googleDevtoolsKsp = "2.3.5"'
+          new = 'googleDevtoolsKsp = "2.3.6"'
 
-          # Remove Firebase dependencies
-          s = re.sub(
-              r'^[ \t]*(?:implementation|api|runtimeOnly)\s*\([^\\n]*firebase[^\\n]*\)\s*\r?\n',
-              '',
-              s,
-              flags=re.IGNORECASE | re.MULTILINE
-          )
+          if old in text:
+              text = text.replace(old, new)
+              print("KSP changed: 2.3.5 -> 2.3.6")
+          elif 'googleDevtoolsKsp = "2.3.6"' in text:
+              print("KSP is already 2.3.6")
+          else:
+              print("WARNING: KSP version line was not found")
 
-          # Remove googleServices { ... }
-          while True:
-              m = re.search(
-                  r'(?m)^[ \t]*googleServices\s*\{',
-                  s
-              )
-
-              if not m:
-                  break
-
-              start = m.start()
-              brace = s.find("{", m.start())
-              depth = 0
-              end = None
-
-              for i in range(brace, len(s)):
-                  if s[i] == "{":
-                      depth += 1
-                  elif s[i] == "}":
-                      depth -= 1
-                      if depth == 0:
-                          end = i + 1
-                          break
-
-              if end is None:
-                  break
-
-              if end < len(s) and s[end] == "\n":
-                  end += 1
-
-              s = s[:start] + s[end:]
-
-          p.write_text(s, encoding="utf-8")
-
-          print("Firebase/Google Services removed:")
-          print(p)
+          toml.write_text(text, encoding="utf-8")
           PY
 
-      - name: Verify Firebase removal
+      - name: Create debug.keystore
         env:
           PROJECT_DIR: ${{ env.PROJECT_DIR }}
         run: |
-          echo "Checking Gradle configuration..."
+          if [ ! -f "$PROJECT_DIR/debug.keystore" ]; then
+            echo "Creating debug.keystore..."
 
-          if grep -Eiq \
-            'libs\.plugins\.google\.services|firebase\.' \
-            "$PROJECT_DIR/app/build.gradle.kts"
-          then
-            echo "ERROR: Firebase/Google Services still exists"
-            grep -Ein \
-              'libs\.plugins\.google\.services|firebase\.' \
-              "$PROJECT_DIR/app/build.gradle.kts" || true
-            exit 1
+            keytool -genkeypair \
+              -v \
+              -keystore "$PROJECT_DIR/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+
+          else
+            echo "debug.keystore already exists."
           fi
 
-          echo "Firebase/Google Services successfully removed."
+          ls -lh "$PROJECT_DIR/debug.keystore"
+
+      - name: Check Firebase configuration
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "Checking Google Services..."
+
+          find "$PROJECT_DIR" \
+            -name "google-services.json" \
+            -print || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
+      - name: Clean previous build
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          gradle clean --no-daemon
+
       - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
 
       - name: Find APK
         if: always()
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
         run: |
-          find "${PROJECT_DIR}" -type f -name "*.apk" -print || true
+          echo "Searching for APK..."
+
+          find "$PROJECT_DIR" \
+            -type f \
+            -name "*.apk" \
+            -print || true
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: MediaHub-debug-apk
+          name: MediaHub-debug-APK
           path: |
             ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
