@@ -27,10 +27,106 @@ jobs:
           mkdir mediahub-build
           unzip -q mediahub.zip -d mediahub-build
 
-      - name: Find Android project
+      - name: Locate Android project
         run: |
-          echo "Searching for settings.gradle..."
-          find mediahub-build -name "settings.gradle*" -print
+          PROJECT_DIR="$(dirname "$(find mediahub-build -name 'settings.gradle.kts' -print -quit)")"
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: settings.gradle.kts not found"
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project: $PROJECT_DIR"
+
+      - name: Remove Firebase and Google Services
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          p = Path(os.environ["PROJECT_DIR"]) / "app" / "build.gradle.kts"
+
+          if not p.exists():
+              raise SystemExit(f"Missing: {p}")
+
+          s = p.read_text(encoding="utf-8")
+
+          # Remove Google Services plugin
+          s = re.sub(
+              r'^[ \t]*alias\s*\(\s*libs\.plugins\.google\.services\s*\)\s*\r?\n',
+              '',
+              s,
+              flags=re.MULTILINE
+          )
+
+          # Remove Firebase dependencies
+          s = re.sub(
+              r'^[ \t]*(?:implementation|api|runtimeOnly)\s*\([^\\n]*firebase[^\\n]*\)\s*\r?\n',
+              '',
+              s,
+              flags=re.IGNORECASE | re.MULTILINE
+          )
+
+          # Remove googleServices { ... }
+          while True:
+              m = re.search(
+                  r'(?m)^[ \t]*googleServices\s*\{',
+                  s
+              )
+
+              if not m:
+                  break
+
+              start = m.start()
+              brace = s.find("{", m.start())
+              depth = 0
+              end = None
+
+              for i in range(brace, len(s)):
+                  if s[i] == "{":
+                      depth += 1
+                  elif s[i] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          end = i + 1
+                          break
+
+              if end is None:
+                  break
+
+              if end < len(s) and s[end] == "\n":
+                  end += 1
+
+              s = s[:start] + s[end:]
+
+          p.write_text(s, encoding="utf-8")
+
+          print("Firebase/Google Services removed:")
+          print(p)
+          PY
+
+      - name: Verify Firebase removal
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "Checking Gradle configuration..."
+
+          if grep -Eiq \
+            'libs\.plugins\.google\.services|firebase\.' \
+            "$PROJECT_DIR/app/build.gradle.kts"
+          then
+            echo "ERROR: Firebase/Google Services still exists"
+            grep -Ein \
+              'libs\.plugins\.google\.services|firebase\.' \
+              "$PROJECT_DIR/app/build.gradle.kts" || true
+            exit 1
+          fi
+
+          echo "Firebase/Google Services successfully removed."
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -38,30 +134,20 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          PROJECT_DIR=$(dirname "$(find mediahub-build -name "settings.gradle.kts" -print -quit)")
-          
-          echo "Android project found at:"
-          echo "$PROJECT_DIR"
-          
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: settings.gradle.kts not found!"
-            exit 1
-          fi
-          
-          cd "$PROJECT_DIR"
-          
-          echo "Building APK..."
-          gradle :app:assembleDebug --no-daemon
+          gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Find APK
+        if: always()
         run: |
-          echo "APK files:"
-          find mediahub-build -type f -name "*.apk" -print
+          find "${PROJECT_DIR}" -type f -name "*.apk" -print || true
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: MediaHub-debug-apk
-          path: mediahub-build/**/app/build/outputs/apk/debug/*.apk
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
